@@ -72,12 +72,12 @@ class SolarSystem:
 
     @staticmethod
     @njit
-    def _mean2ecc(ecc:np.ndarray, MA:np.ndarray) -> np.ndarray:
+    def _mean2ecc(ecc:np.ndarray, MA:np.ndarray, etol=1e-10) -> np.ndarray:
         # mean to eccentric anomaly utility function
         N = ecc.shape[0]
         EA = np.empty((N,), dtype=ecc.dtype)
         for i in range(N):
-            EA[i] = mean2ecc(ecc[i], MA[i])
+            EA[i] = mean2ecc(ecc[i], MA[i], tol=etol)
         return EA
 
     
@@ -114,7 +114,7 @@ class SolarSystem:
         return pts
 
 
-    def get_state_at_t(self, t, idx:pd.Series = None) -> pd.DataFrame:
+    def get_state_at_t(self, t, idx:pd.Series = None, etol=1e-10) -> pd.DataFrame:
         # returns the orbital states of the bodies at idx indices, propagated to time t (seconds)
         # if no indices are provided, all the bodies states are returned
         if idx is None:
@@ -133,7 +133,7 @@ class SolarSystem:
         ecc_arr = df['e'].to_numpy(dtype=float)
         ma_arr = df['MA'].to_numpy(dtype=float)
 
-        ea_arr = self._mean2ecc(ecc_arr, ma_arr)
+        ea_arr = self._mean2ecc(ecc_arr, ma_arr, etol=etol)
         ta_arr = self._ecc2true(ecc_arr, ea_arr)
 
         df['EA'] = ea_arr

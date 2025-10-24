@@ -24,26 +24,10 @@ base_fig.add_trace(go.Scatter3d(
         marker=dict(size=6, color='orange', opacity=1)
     ))
 
-
 # draw the orbits (only once)
 for i in range(len(orbits)):
     row = orbits.iloc[i]
     pts = row['orbit'] / AU
-
-    base_fig.add_trace(go.Scatter3d(
-        x=pts[0], y=pts[1], z=pts[2],
-        mode='lines',
-        line=dict(color='darkslategray', width=1),
-        name='Planet Orbits',
-        legendgroup='orbits',
-        showlegend=(i == 0)
-    ))
-
- # draw the orbits
-for i in range(len(orbits)):
-    row = orbits.iloc[i]
-    pts = row['orbit'].copy()
-    pts /= AU
 
     base_fig.add_trace(go.Scatter3d(
         x=pts[0], y=pts[1], z=pts[2],
@@ -54,34 +38,40 @@ for i in range(len(orbits)):
         showlegend=(i == 0)                 # show only once in the legend
         ))
 
+
 app = dash.Dash(__name__)
 
 # Layout
 app.layout = html.Div([
-    html.H2("Altaira System Visualizer (GTOC13)"),
-    
-    dcc.Graph(id='orbit-plot', style={'height': '60vh'}),
-    dcc.Store(id='camera-store'),
+    html.Div([
+        html.H2("Altaira System Visualizer (GTOC13)"),
+        dcc.Graph(id='orbit-plot', style={'height': '90vh', 'width': '100%'}),
+        dcc.Store(id='camera-store'),
+    ], style={'flex': '3', 'padding': '10px'}),
 
     html.Div([
+        html.H4("Controls"),
         html.Label("Time (years):"),
         dcc.Slider(id='time-slider', min=0, max=200, step=1, value=0,
-                   marks={0: '0', 100: '100', 200: '200'})
-    ], style={'margin': '20px'}),
+                   marks={i:str(i) for i in [0,25,50,75,100,125,150,175,200]}),
 
-    html.Div([
+        html.Label("Body Types:"),
         dcc.Checklist(
             id='body-types',
             options=[
                 {'label': 'Planets', 'value': 'planet'},
                 {'label': 'Asteroids', 'value': 'asteroid'},
-                {'label': 'Comets', 'value': 'comet'}
+                {'label': 'Comets', 'value': 'comet'},
             ],
-            value=['planet', 'asteroid', 'comet'],
-            inline=True
-        )
-    ])
-])
+            value=['planet', 'asteroid', 'comet']
+        ),
+    ], style={'flex': '1', 'padding': '10px'})
+],
+style={
+    'display': 'flex',
+    'flexDirection': 'row',
+    'height': '100vh'
+})
 
 # 1️⃣ Callback to store camera state when user moves it
 @app.callback(

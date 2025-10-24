@@ -5,16 +5,19 @@ from numba import njit
 
 
 @njit
-def mean2ecc(e, M, tol=1e-10, g_clip=0.5, max_iter=10) -> float:
+def mean2ecc(e, M, tol=1e-10, g_clip=0.5, max_iter=30) -> float:
     f = lambda e,M,E: E-e*math.sin(E)-M
     df = lambda e,E: 1-e*math.cos(E)
     clip = lambda value,low,high: min(max(low, value), high)
 
     E = M + e*math.sin(M)
     n = 0
-    while abs(f(e,M,E)) > tol and n < max_iter:
+    while n < max_iter:
         dE = -f(e,M,E)/df(e,E)
         dE = clip(dE, -g_clip, g_clip)
+
+        if abs(dE) < tol:
+            break
 
         E = E + dE
         n += 1
