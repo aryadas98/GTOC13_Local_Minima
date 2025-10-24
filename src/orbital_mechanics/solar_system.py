@@ -2,9 +2,10 @@ import numpy as np
 import pandas as pd
 
 from pathlib import Path
+from numba import njit
 
-from constants import ALTAIRA_MU
-from orbit_utils import mean2ecc, ecc2true, kep2rv
+from .constants import ALTAIRA_MU
+from .orbit_utils import mean2ecc, ecc2true, kep2rv, orbit_points
 
 class SolarSystem:
 
@@ -70,22 +71,50 @@ class SolarSystem:
 
 
     @staticmethod
-    def _mean2ecc(s):
+    @njit
+    def _mean2ecc(ecc:np.ndarray, MA:np.ndarray) -> np.ndarray:
         # mean to eccentric anomaly utility function
-        # for applying in numba.apply
-        return mean2ecc(s[0], s[1])
+        N = ecc.shape[0]
+        EA = np.empty((N,), dtype=ecc.dtype)
+        for i in range(N):
+            EA[i] = mean2ecc(ecc[i], MA[i])
+        return EA
+
     
     @staticmethod
-    def _ecc2true(s):
+    @njit
+    def _ecc2true(ecc:np.ndarray, EA:np.ndarray) -> np.ndarray:
         # eccentric to true anomaly utility function
-        # for applying in numba.apply
-        return ecc2true(s[0], s[1])
+        N = ecc.shape[0]
+        TA = np.empty((N,), dtype=ecc.dtype)
+        for i in range(N):
+            TA[i] = ecc2true(ecc[i], EA[i])
+        return TA
+
 
     @staticmethod
-    def _kep2rv(s):
-        return kep2rv(s, ALTAIRA_MU)
+    @njit
+    def _kep2rv(kep:np.ndarray) -> np.ndarray:
+        # keplerian elements to r,v vectors utility function
+        N = kep.shape[0]
+        rv = np.empty((N,6), dtype=kep.dtype)
+        for i in range(N):
+            rv[i] = kep2rv(kep[i], ALTAIRA_MU)
+        return rv
 
-    def get_state_at_t(self, t, idx:pd.Series = None):
+
+    @staticmethod
+    def _orbit_points(kep:np.ndarray, ta_arr:np.ndarray) -> list:
+        # get the orbit points for all the given bodies
+        # mainly used to plot the orbits
+        N = kep.shape[0]
+        pts = np.empty((N,3,ta_arr.shape[0]), dtype=kep.dtype)
+        for i in range(N):
+            pts[i] = orbit_points(kep[i], ta_arr)
+        return pts
+
+
+    def get_state_at_t(self, t, idx:pd.Series = None) -> pd.DataFrame:
         # returns the orbital states of the bodies at idx indices, propagated to time t (seconds)
         # if no indices are provided, all the bodies states are returned
         if idx is None:
@@ -100,21 +129,44 @@ class SolarSystem:
         df['MA'] += df['n'] * (t - t0)
         df['MA'] = (df['MA'] + np.pi) % (2 * np.pi) - np.pi
 
-        # calculate the eccentric anomaly efficiently
-        df['EA'] = df[['e','MA']].apply(self._mean2ecc, axis=1, raw=True, engine='numba',
-                                       engine_kwargs={"nopython": True, "nogil": True, "parallel": True})
-        
-        # calculate the true anomaly efficiently
-        df['TA'] = df[['e','EA']].apply(self._ecc2true, axis=1, raw=True, engine='numba',
-                                       engine_kwargs={"nopython": True, "nogil": True, "parallel": True})
-        
+        # calculate the eccentric and true anomaly efficiently
+        ecc_arr = df['e'].to_numpy(dtype=float)
+        ma_arr = df['MA'].to_numpy(dtype=float)
 
-        # calculate the cartesian position and velocity
-        df[['rx','ry','rz','vx','vy','vz']] = df[['A','e','i','RAAN','AOP','TA']].apply(self._kep2rv, axis=1,
-                                                        raw=True, result_type='expand', engine='numba',
-                                                        engine_kwargs={"nopython": True, "nogil": True, "parallel": True})
+        ea_arr = self._mean2ecc(ecc_arr, ma_arr)
+        ta_arr = self._ecc2true(ecc_arr, ea_arr)
 
+        df['EA'] = ea_arr
+        df['TA'] = ta_arr
+
+        # calculate the cartesian vectors
+        kep_arr = df[['A','e','i','RAAN','AOP','TA']].to_numpy(dtype=float)
+        rv_arr = self._kep2rv(kep_arr)
+
+        df[['rx','ry','rz','vx','vy','vz']] = rv_arr
+
+        return df
+
+
+    def get_orbit_points(self, idx:pd.Series = None, num_points:int = 20) -> pd.DataFrame:
+        # returns x,y,z arrays around the orbit of the bodies denoted by idx
+        # this function is useful for plotting the orbit
+
+        if idx is None:
+            idx = pd.Series(np.arange(len(self.init_bodies)))
+        
+        df = self.init_bodies.loc[idx].copy()
+        ta_arr = np.linspace(-np.pi, np.pi, num_points)
+        df.attrs['TA_arr'] = ta_arr
+        kep_arr = df[['A','e','i','RAAN','AOP']].to_numpy(dtype=float)
+
+        # calculate the x,y,z points for the orbit trajectory
+        out = self._orbit_points(kep_arr, ta_arr)
+        df['orbit'] = [out[i] for i in range(out.shape[0])]
+
+        return df
 
 if __name__ == "__main__":
     ss = SolarSystem()
     ss.get_state_at_t(100.0, ss.planets_idx)
+    ss.get_orbit_points(ss.planets_idx)
