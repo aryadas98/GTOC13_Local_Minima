@@ -3,7 +3,7 @@ from dash import dcc, html, Input, Output, State
 import plotly.graph_objects as go
 
 from orbital_mechanics.solar_system import SolarSystem
-from orbital_mechanics.constants import AU, YEAR
+from orbital_mechanics.constants import ALTAIRA_AU as AU, YEAR
 
 # Initialize your model
 solar_system = SolarSystem()

@@ -1,15 +1,63 @@
 import numpy as np
 import pandas as pd
+import pykep
 
 from pathlib import Path
-from numba import njit
 
-from .constants import ALTAIRA_MU
-from .orbit_utils import mean2ecc, ecc2true, kep2rv, orbit_points
+from .constants import ALTAIRA_MU as MU
+
+
+class GTOC13Body(pykep.planet.keplerian):
+    def __init__(self, id, body_type, weight, *args, **kwargs):
+        self.gtoc13_id = int(id)
+        self.gtoc13_btype = str(body_type)
+        self.gtoc13_weight = float(weight)
+        super().__init__(*args, **kwargs)
+
+
+    def __str__(self):
+        mystr = f"Id: {self.gtoc13_id}\n" \
+                f"Type: {self.gtoc13_btype}\n" \
+                f"Weight: {self.gtoc13_weight}\n"
+        def_str = super().__str__()
+
+        return mystr + def_str
+
 
 class SolarSystem:
 
     def __init__(self):
+        # read the csv files
+        df = self.read_and_preprocess_files()
+
+        # make the indices
+        self.make_indices(df)
+
+        # now convert the data frame into an array of pykep planets
+        self.t0 = 0.0
+        self.bodies = np.empty(len(df), dtype=GTOC13Body)
+        
+        for i in range(len(df)):
+            row = df.iloc[i]
+            self.bodies[i] = GTOC13Body(
+                row['id'],
+                row['type'],
+                row['Wgt'],
+                pykep.epoch(self.t0),
+                row[['A','e','i','RAAN','AOP','MA']],
+                MU,
+                row['mu'],
+                row['R'],
+                1.1*row['R'],
+                row['name']
+            )
+        
+        # also store the original dataframe (for human readability)
+        df.attrs['epoch'] = self.t0
+        self.ss_bodies_df = df
+
+
+    def read_and_preprocess_files(self):
         # hardcoded filenames
         PLANET_FILE = "gtoc13_planets.csv"
         ASTEROID_FILE = "gtoc13_asteroids.csv"
@@ -26,8 +74,7 @@ class SolarSystem:
                                      names=['id','name','mu','R','A','e','i','RAAN','AOP','MA','Wgt'],
                                      encoding_errors='ignore')
         
-        planet_df[['type', 'massless']] = ['planet', False]
-        planet_df.loc[np.isclose(planet_df['mu'],0.0), 'massless'] = True 
+        planet_df['type'] = 'planet'
 
         asteroid_df = pd.read_csv(asteroid_path,
                                        header=None,
@@ -36,7 +83,7 @@ class SolarSystem:
                                        names=['id','A','e','i','RAAN','AOP','MA','Wgt'],
                                        encoding_errors='ignore')
         
-        asteroid_df[['name','mu','R','type','massless']] = ['',0.0,0.0,'asteroid',True]
+        asteroid_df[['name','mu','R','type']] = ['',0.0,0.0,'asteroid']
         
         comet_df = pd.read_csv(comet_path,
                                     header=None,
@@ -45,126 +92,78 @@ class SolarSystem:
                                     names=['id','A','e','i','RAAN','AOP','MA','Wgt'],
                                     encoding_errors='ignore')
         
-        comet_df[['name','mu','R','type','massless']] = ['',0.0,0.0,'comet',True]
+        comet_df[['name','mu','R','type']] = ['',0.0,0.0,'comet']
 
-        self.init_bodies = pd.concat([planet_df, comet_df, asteroid_df], ignore_index=True)
+        combined_df = pd.concat([planet_df, comet_df, asteroid_df], ignore_index=True)
 
-        # add epoch information
-        self.init_bodies.attrs['epoch'] = 0.0
+        # convert degrees to radians
+        combined_df[['i','RAAN','AOP','MA']] *= pykep.DEG2RAD
 
-        # convert orbital angles to radians
-        self.init_bodies[['i','RAAN','AOP','MA']] = np.deg2rad(self.init_bodies[['i','RAAN','AOP','MA']])
+        return combined_df
 
-        # calculate the orbital angular velocity and time period
-        self.init_bodies['n'] = np.sqrt(ALTAIRA_MU / self.init_bodies['A'] ** 3)
-        self.init_bodies['T'] = 2*np.pi / self.init_bodies['n']
 
+    def make_indices(self, df):
         # collect the indices for different types of bodies
-        self.planets_idx = self.init_bodies['type'] == 'planet'
-        self.massive_planets_idx = (self.init_bodies['type'] == 'planet') & \
-                                   (self.init_bodies['massless'] == False)
-        self.massless_planets_idx = (self.init_bodies['type'] == 'planet') & \
-                                                  (self.init_bodies['massless'] == True)
-        
-        self.comets_idx = self.init_bodies['type'] == 'comet'
-        self.asteroids_idx = self.init_bodies['type'] == 'asteroid'
+        # run this function after reading and preprocessing the files
+        planets_mask = df['type'] == 'planet'
+        massive_planets_mask = (df['type'] == 'planet') & (df['mu'] > 0)
+        massless_planets_mask = (df['type'] == 'planet') & (df['mu'] == 0.0)
+        comets_mask = df['type'] == 'comet'
+        asteroids_mask = df['type'] == 'asteroid'
+
+        self.planets_idx = df[planets_mask].index.to_numpy()
+        self.massive_planets_idx = df[massive_planets_mask].index.to_numpy()
+        self.massless_planets_idx = df[massless_planets_mask].index.to_numpy()
+        self.comets_idx = df[comets_mask].index.to_numpy()
+        self.asteroids_idx = df[asteroids_mask].index.to_numpy()
 
 
-    @staticmethod
-    @njit
-    def _mean2ecc(ecc:np.ndarray, MA:np.ndarray, etol=1e-10) -> np.ndarray:
-        # mean to eccentric anomaly utility function
-        N = ecc.shape[0]
-        EA = np.empty((N,), dtype=ecc.dtype)
-        for i in range(N):
-            EA[i] = mean2ecc(ecc[i], MA[i], tol=etol)
-        return EA
-
-    
-    @staticmethod
-    @njit
-    def _ecc2true(ecc:np.ndarray, EA:np.ndarray) -> np.ndarray:
-        # eccentric to true anomaly utility function
-        N = ecc.shape[0]
-        TA = np.empty((N,), dtype=ecc.dtype)
-        for i in range(N):
-            TA[i] = ecc2true(ecc[i], EA[i])
-        return TA
-
-
-    @staticmethod
-    @njit
-    def _kep2rv(kep:np.ndarray) -> np.ndarray:
-        # keplerian elements to r,v vectors utility function
-        N = kep.shape[0]
-        rv = np.empty((N,6), dtype=kep.dtype)
-        for i in range(N):
-            rv[i] = kep2rv(kep[i], ALTAIRA_MU)
-        return rv
-
-
-    @staticmethod
-    def _orbit_points(kep:np.ndarray, ta_arr:np.ndarray) -> list:
-        # get the orbit points for all the given bodies
-        # mainly used to plot the orbits
-        N = kep.shape[0]
-        pts = np.empty((N,3,ta_arr.shape[0]), dtype=kep.dtype)
-        for i in range(N):
-            pts[i] = orbit_points(kep[i], ta_arr)
-        return pts
-
-
-    def get_state_at_t(self, t, idx:pd.Series = None, etol=1e-10) -> pd.DataFrame:
+    def get_state_at_t(self, t:float, idx:np.ndarray = None) -> pd.DataFrame:
         # returns the orbital states of the bodies at idx indices, propagated to time t (seconds)
         # if no indices are provided, all the bodies states are returned
         if idx is None:
-            idx = pd.Series(np.arange(len(self.init_bodies)))
+            idx = np.arange(len(self.bodies))
         
-        df = self.init_bodies.loc[idx].copy()
-        df.attrs['epoch'] = t
+        t *= pykep.SEC2DAY
+
+        out_df = self.ss_bodies_df.iloc[idx].copy()
+        out_df.attrs['epoch'] = t
+        out_df[['MA','rx','ry','rz','vx','vy','vz']] = None
+
+        # propagate the planets and set their positions in the output df
+        for i in idx:
+            pl = self.bodies[i]
+            ma = pl.osculating_elements(pykep.epoch(t))
+            ma = ma[5]       # mean anomaly
+            r,v = pl.eph(pykep.epoch(t))  # position, velocity
+            out_df.loc[i, ['MA','rx','ry','rz','vx','vy','vz']] = [ma, *r, *v]
+
+        return out_df
 
 
-        # calculate the mean anomaly at time t
-        t0 = self.init_bodies.attrs['epoch']
-        df['MA'] += df['n'] * (t - t0)
-        df['MA'] = (df['MA'] + np.pi) % (2 * np.pi) - np.pi
-
-        # calculate the eccentric and true anomaly efficiently
-        ecc_arr = df['e'].to_numpy(dtype=float)
-        ma_arr = df['MA'].to_numpy(dtype=float)
-
-        ea_arr = self._mean2ecc(ecc_arr, ma_arr, etol=etol)
-        ta_arr = self._ecc2true(ecc_arr, ea_arr)
-
-        df['EA'] = ea_arr
-        df['TA'] = ta_arr
-
-        # calculate the cartesian vectors
-        kep_arr = df[['A','e','i','RAAN','AOP','TA']].to_numpy(dtype=float)
-        rv_arr = self._kep2rv(kep_arr)
-
-        df[['rx','ry','rz','vx','vy','vz']] = rv_arr
-
-        return df
-
-
-    def get_orbit_points(self, idx:pd.Series = None, num_points:int = 20) -> pd.DataFrame:
+    def get_orbit_points(self, idx:np.ndarray = None, num_points:int = 20) -> pd.DataFrame:
         # returns x,y,z arrays around the orbit of the bodies denoted by idx
         # this function is useful for plotting the orbit
-
         if idx is None:
-            idx = pd.Series(np.arange(len(self.init_bodies)))
+            idx = np.arange(len(self.bodies))
+
+        out_df = self.ss_bodies_df.iloc[idx].copy()
+        xyz_points = np.empty((out_df.shape[0], 3, num_points))
+
+        # calculate the x,y,z points for each orbit one by one
+        for i in range(len(idx)):
+            pl = self.bodies[idx[i]]
+            pl_T = pl.compute_period(pykep.epoch(0))
+            t_arr = np.linspace(self.t0, self.t0 + pl_T, num_points)
+
+            for j in range(len(t_arr)):
+                _t = t_arr[j] * pykep.SEC2DAY
+                r,_ = pl.eph(pykep.epoch(_t))
+                xyz_points[i,:,j] = r
         
-        df = self.init_bodies.loc[idx].copy()
-        ta_arr = np.linspace(-np.pi, np.pi, num_points)
-        df.attrs['TA_arr'] = ta_arr
-        kep_arr = df[['A','e','i','RAAN','AOP']].to_numpy(dtype=float)
+        out_df['orbit'] = [xyz_points[i] for i in range(xyz_points.shape[0])]
 
-        # calculate the x,y,z points for the orbit trajectory
-        out = self._orbit_points(kep_arr, ta_arr)
-        df['orbit'] = [out[i] for i in range(out.shape[0])]
-
-        return df
+        return out_df
 
 if __name__ == "__main__":
     ss = SolarSystem()
