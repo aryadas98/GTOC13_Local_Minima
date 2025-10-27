@@ -1,7 +1,7 @@
 import plotly.graph_objects as go
 
 from orbital_mechanics.solar_system import SolarSystem
-from orbital_mechanics.constants import ALTAIRA_AU as AU
+from common.constants import ALTAIRA_AU as AU
 
 ss = SolarSystem()
 df = ss.get_state_at_t(0)  # example snapshot

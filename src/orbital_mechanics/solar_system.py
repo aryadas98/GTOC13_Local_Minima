@@ -4,7 +4,7 @@ import pykep
 
 from pathlib import Path
 
-from .constants import ALTAIRA_MU as MU
+from common.constants import ALTAIRA_MU as MU
 
 
 class GTOC13Body(pykep.planet.keplerian):
@@ -54,7 +54,7 @@ class SolarSystem:
         
         # also store the original dataframe (for human readability)
         df.attrs['epoch'] = self.t0
-        self.ss_bodies_df = df
+        self.bodies_df = df
 
 
     def read_and_preprocess_files(self):
@@ -126,7 +126,7 @@ class SolarSystem:
         
         t *= pykep.SEC2DAY
 
-        out_df = self.ss_bodies_df.iloc[idx].copy()
+        out_df = self.bodies_df.iloc[idx].copy()
         out_df.attrs['epoch'] = t
         out_df[['MA','rx','ry','rz','vx','vy','vz']] = None
 
@@ -147,7 +147,7 @@ class SolarSystem:
         if idx is None:
             idx = np.arange(len(self.bodies))
 
-        out_df = self.ss_bodies_df.iloc[idx].copy()
+        out_df = self.bodies_df.iloc[idx].copy()
         xyz_points = np.empty((out_df.shape[0], 3, num_points))
 
         # calculate the x,y,z points for each orbit one by one
