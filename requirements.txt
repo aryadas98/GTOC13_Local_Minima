@@ -1,5 +1,5 @@
 dash==3.2.0
-numba==0.60.0
 numpy==2.3.4
 pandas==2.3.3
 plotly==6.3.1
+pykep==2.6

@@ -1,7 +1,7 @@
 import plotly.graph_objects as go
 
 from orbital_mechanics.solar_system import SolarSystem
-from orbital_mechanics.constants import AU
+from common.constants import ALTAIRA_AU as AU
 
 ss = SolarSystem()
 df = ss.get_state_at_t(0)  # example snapshot
@@ -20,7 +20,7 @@ fig.add_trace(go.Scatter3d(
     ))
 
 # Add all planets
-planets = df[ss.planets_idx]
+planets = df.iloc[ss.planets_idx]
 fig.add_trace(go.Scatter3d(
     x=planets['rx'], y=planets['ry'], z=planets['rz'],
     mode='markers+text',
@@ -30,7 +30,7 @@ fig.add_trace(go.Scatter3d(
 ))
 
 # Add asteroids
-asteroids = df[ss.asteroids_idx]
+asteroids = df.iloc[ss.asteroids_idx]
 fig.add_trace(go.Scatter3d(
     x=asteroids['rx'], y=asteroids['ry'], z=asteroids['rz'],
     mode='markers',
@@ -39,7 +39,7 @@ fig.add_trace(go.Scatter3d(
 ))
 
 # Add comets
-comets = df[ss.comets_idx]
+comets = df.iloc[ss.comets_idx]
 fig.add_trace(go.Scatter3d(
     x=comets['rx'], y=comets['ry'], z=comets['rz'],
     mode='markers',
