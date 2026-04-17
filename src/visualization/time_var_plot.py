@@ -1,12 +1,15 @@
 import dash
+import numpy as np
 from dash import dcc, html, Input, Output, State
 import plotly.graph_objects as go
 
 from orbital_mechanics.solar_system import SolarSystem
+# from orbital_mechanics.simple_system import SimpleSystem
 from common.constants import ALTAIRA_AU as AU, YEAR
 
 # Initialize your model
 solar_system = SolarSystem()
+# solar_system = SimpleSystem()
 
 # calculate the orbits
 orbits = solar_system.get_orbit_points(solar_system.planets_idx,
@@ -53,6 +56,7 @@ app.layout = html.Div([
         html.H4("Controls"),
         html.Label("Time (years):"),
         dcc.Slider(id='time-slider', min=0, max=200, step=1, value=0,
+                #    marks={i:f'{i:.1f}' for i in np.linspace(15,50,10)}),
                    marks={i:str(i) for i in [0,25,50,75,100,125,150,175,200]}),
 
         html.Label("Body Types:"),
@@ -65,6 +69,12 @@ app.layout = html.Div([
             ],
             value=['planet', 'asteroid', 'comet']
         ),
+        html.Div([
+            html.P("Planet  period  half_sma_period"),
+            html.P("Hoth 4.916454	1.738229"),
+            html.P("Beyonc	19.967888	7.059715"),
+            html.P("Bespin	52.748348	18.649357"),
+            html.P("Jotunn	71.623195	25.322623")])
     ], style={'flex': '1', 'padding': '10px'})
 ],
 style={
@@ -100,11 +110,11 @@ def update_plot(time_value, selected_types, camera_state):
     fig = base_fig.to_dict()        # copy as dict
     fig = go.Figure(fig)            # recreate figure
 
-    for btype, color, size in [('planet', 'yellow', 6),
-                               ('asteroid', 'gray', 2),
-                               ('comet', 'lightblue', 3)]:
+    for btype, idx, color, size in [('planet', solar_system.planets_idx, 'yellow', 6),
+                               ('asteroid', solar_system.asteroids_idx, 'gray', 2),
+                               ('comet', solar_system.comets_idx, 'lightblue', 3)]:
         if btype in selected_types:
-            data = df[df['type'] == btype]
+            data = df.iloc[idx]
             fig.add_trace(go.Scatter3d(
                 x=data['rx'], y=data['ry'], z=data['rz'],
                 mode='markers' if btype != 'planet' else 'markers+text',
@@ -117,7 +127,10 @@ def update_plot(time_value, selected_types, camera_state):
         scene=dict(
             xaxis=dict(title='X [AU]', range=[-200, 200], autorange=False),
             yaxis=dict(title='Y [AU]', range=[-200, 200], autorange=False),
-            zaxis=dict(title='Z [AU]', range=[-100, 100], autorange=False),
+            zaxis=dict(title='Z [AU]', range=[-200, 200], autorange=False),
+            # xaxis=dict(title='X [AU]', range=[-25, 25], autorange=False),
+            # yaxis=dict(title='Y [AU]', range=[-25, 25], autorange=False),
+            # zaxis=dict(title='Z [AU]', range=[-25, 25], autorange=False),
             aspectmode='manual',
             aspectratio=dict(x=1, y=1, z=100/200)
         ),

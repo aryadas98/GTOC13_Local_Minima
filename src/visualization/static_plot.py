@@ -1,9 +1,11 @@
 import plotly.graph_objects as go
 
-from orbital_mechanics.solar_system import SolarSystem
+# from orbital_mechanics.solar_system import SolarSystem
+from orbital_mechanics.simple_system import SimpleSystem
 from common.constants import ALTAIRA_AU as AU
 
-ss = SolarSystem()
+# ss = SolarSystem()
+ss = SimpleSystem()
 df = ss.get_state_at_t(0)  # example snapshot
 orbits = ss.get_orbit_points(ss.planets_idx, num_points=50)  # orbit points
 df[['rx', 'ry', 'rz']] /= AU

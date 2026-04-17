@@ -15,11 +15,11 @@ class GTOC13Body(pykep.planet.keplerian):
         super().__init__(*args, **kwargs)
 
 
-    def __str__(self):
+    def __repr__(self):
         mystr = f"Id: {self.gtoc13_id}\n" \
                 f"Type: {self.gtoc13_btype}\n" \
                 f"Weight: {self.gtoc13_weight}\n"
-        def_str = super().__str__()
+        def_str = super().__repr__()
 
         return mystr + def_str
 
