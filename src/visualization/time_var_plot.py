@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import dash
 import numpy as np
 from dash import dcc, html, Input, Output, State
@@ -6,6 +8,8 @@ import plotly.graph_objects as go
 from orbital_mechanics.solar_system import SolarSystem
 # from orbital_mechanics.simple_system import SimpleSystem
 from common.constants import ALTAIRA_AU as AU, YEAR
+
+PLOT = True
 
 # Initialize your model
 solar_system = SolarSystem()
@@ -42,9 +46,64 @@ for i in range(len(orbits)):
         ))
 
 
+def _load_default_solution_samples():
+    if not PLOT:
+        return []
+
+    solution_path = Path(__file__).resolve().parents[1] / "dev" / "capture_test.csv"
+    if not solution_path.exists():
+        return []
+
+    try:
+        from classes.Solution import Solution
+        solution = Solution.from_csv(str(solution_path))
+        return solution.trajectory_samples()
+    except Exception:
+        return []
+
+
+SOLUTION_SAMPLES = _load_default_solution_samples()
+
+
 app = dash.Dash(__name__)
 
 # Layout
+controls_children = [
+    html.H4("Controls"),
+    html.Label("Time (years):"),
+    dcc.Slider(
+        id='time-slider',
+        min=0,
+        max=200,
+        step=1,
+        value=0,
+        marks={i: str(i) for i in [0, 25, 50, 75, 100, 125, 150, 175, 200]},
+    ),
+    html.Label("Body Types:"),
+    dcc.Checklist(
+        id='body-types',
+        options=[
+            {'label': 'Planets', 'value': 'planet'},
+            {'label': 'Asteroids', 'value': 'asteroid'},
+            {'label': 'Comets', 'value': 'comet'},
+        ],
+        value=['planet', 'asteroid', 'comet'],
+    ),
+]
+
+if PLOT:
+    controls_children.extend([
+        html.Label("Overlays:"),
+        dcc.Checklist(
+            id='overlays',
+            options=[
+                {'label': 'Solution trajectory', 'value': 'solution'},
+            ],
+            value=[],
+        ),
+    ])
+
+
 app.layout = html.Div([
     html.Div([
         html.H2("Altaira System Visualizer (GTOC13)"),
@@ -52,30 +111,7 @@ app.layout = html.Div([
         dcc.Store(id='camera-store'),
     ], style={'flex': '3', 'padding': '10px'}),
 
-    html.Div([
-        html.H4("Controls"),
-        html.Label("Time (years):"),
-        dcc.Slider(id='time-slider', min=0, max=200, step=1, value=0,
-                #    marks={i:f'{i:.1f}' for i in np.linspace(15,50,10)}),
-                   marks={i:str(i) for i in [0,25,50,75,100,125,150,175,200]}),
-
-        html.Label("Body Types:"),
-        dcc.Checklist(
-            id='body-types',
-            options=[
-                {'label': 'Planets', 'value': 'planet'},
-                {'label': 'Asteroids', 'value': 'asteroid'},
-                {'label': 'Comets', 'value': 'comet'},
-            ],
-            value=['planet', 'asteroid', 'comet']
-        ),
-        html.Div([
-            html.P("Planet  period  half_sma_period"),
-            html.P("Hoth 4.916454	1.738229"),
-            html.P("Beyonc	19.967888	7.059715"),
-            html.P("Bespin	52.748348	18.649357"),
-            html.P("Jotunn	71.623195	25.322623")])
-    ], style={'flex': '1', 'padding': '10px'})
+    html.Div(controls_children, style={'flex': '1', 'padding': '10px'})
 ],
 style={
     'display': 'flex',
@@ -95,14 +131,7 @@ def save_camera_state(relayout_data, current_state):
         return relayout_data['scene.camera']
     return current_state
 
-# Callback
-@app.callback(
-    Output('orbit-plot', 'figure'),
-    Input('time-slider', 'value'),
-    Input('body-types', 'value'),
-    State('camera-store', 'data'),
-)
-def update_plot(time_value, selected_types, camera_state):
+def _render_plot(time_value, selected_types, overlays, camera_state):
     time_value *= YEAR
     df = solar_system.get_state_at_t(time_value)
     df[['rx', 'ry', 'rz']] /= AU
@@ -123,6 +152,11 @@ def update_plot(time_value, selected_types, camera_state):
                 marker=dict(size=size, color=color, opacity=1)
             ))
 
+    overlays = overlays or []
+    if 'solution' in overlays and SOLUTION_SAMPLES:
+        for trace in _build_solution_traces(SOLUTION_SAMPLES, time_value):
+            fig.add_trace(trace)
+
     fig.update_layout(
         scene=dict(
             xaxis=dict(title='X [AU]', range=[-200, 200], autorange=False),
@@ -142,6 +176,86 @@ def update_plot(time_value, selected_types, camera_state):
         fig.update_layout(scene_camera=camera_state)
 
     return fig
+
+
+if PLOT:
+    @app.callback(
+        Output('orbit-plot', 'figure'),
+        Input('time-slider', 'value'),
+        Input('body-types', 'value'),
+        Input('overlays', 'value'),
+        State('camera-store', 'data'),
+    )
+    def update_plot(time_value, selected_types, overlays, camera_state):
+        return _render_plot(time_value, selected_types, overlays, camera_state)
+else:
+    @app.callback(
+        Output('orbit-plot', 'figure'),
+        Input('time-slider', 'value'),
+        Input('body-types', 'value'),
+        State('camera-store', 'data'),
+    )
+    def update_plot_no_overlay(time_value, selected_types, camera_state):
+        return _render_plot(time_value, selected_types, [], camera_state)
+
+
+def _build_solution_traces(samples, time_limit_seconds):
+    traces = []
+    legend_tracker = {}
+    limit = float(time_limit_seconds)
+
+    color_map = {
+        'Flyby': 'red',
+        'Conic': 'royalblue',
+        'Propagated': 'limegreen',
+    }
+
+    for segment in samples:
+        seg_type = segment['type']
+        epochs = segment['epochs']
+        positions = segment['positions']
+
+        indices = [idx for idx, epoch in enumerate(epochs) if epoch <= limit + 1e-6]
+        if not indices:
+            continue
+
+        xs = [positions[idx].x / AU for idx in indices]
+        ys = [positions[idx].y / AU for idx in indices]
+        zs = [positions[idx].z / AU for idx in indices]
+
+        color = color_map.get(seg_type, 'white')
+        legend_group = f'solution-{seg_type.lower()}'
+        showlegend = not legend_tracker.get(seg_type, False)
+        legend_tracker[seg_type] = True
+
+        if seg_type == 'Flyby' or len(indices) == 1:
+            mode = 'markers'
+            trace = go.Scatter3d(
+                x=xs,
+                y=ys,
+                z=zs,
+                mode=mode,
+                name=f'Solution {seg_type}',
+                legendgroup=legend_group,
+                showlegend=showlegend,
+                marker=dict(size=6, color=color, symbol='diamond'),
+            )
+        else:
+            trace = go.Scatter3d(
+                x=xs,
+                y=ys,
+                z=zs,
+                mode='lines+markers',
+                name=f'Solution {seg_type}',
+                legendgroup=legend_group,
+                showlegend=showlegend,
+                marker=dict(size=3, color=color),
+                line=dict(color=color, width=3),
+            )
+
+        traces.append(trace)
+
+    return traces
 
 
 if __name__ == '__main__':
